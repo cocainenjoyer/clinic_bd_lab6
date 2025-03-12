@@ -18,6 +18,16 @@ private:
         }
         return true;
     }
+    
+    // Вспомогательный метод для обработки оставшихся наборов результатов
+    void processPendingResults() {
+        while (mysql_next_result(conn) == 0) {
+            MYSQL_RES* result = mysql_store_result(conn);
+            if (result) {
+                mysql_free_result(result);
+            }
+        }
+    }
 
 public:
     DatabaseManager() : conn(nullptr) {}
@@ -77,6 +87,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "База данных " << dbName << " успешно создана." << std::endl;
         return true;
     }
@@ -91,6 +102,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "База данных " << dbName << " успешно удалена." << std::endl;
         return true;
     }
@@ -105,6 +117,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "Таблица appointments успешно создана." << std::endl;
         return true;
     }
@@ -119,6 +132,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "Таблица users успешно создана." << std::endl;
         return true;
     }
@@ -133,6 +147,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "Таблица " << tableName << " успешно очищена." << std::endl;
         return true;
     }
@@ -151,6 +166,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "Запись к врачу успешно добавлена." << std::endl;
         return true;
     }
@@ -167,6 +183,7 @@ public:
         MYSQL_RES* result = mysql_store_result(conn);
         if (!result) {
             std::cout << "Ошибка получения результатов: " << mysql_error(conn) << std::endl;
+            processPendingResults();
             return false;
         }
         
@@ -189,6 +206,7 @@ public:
         }
         
         mysql_free_result(result);
+        processPendingResults();
         return true;
     }
 
@@ -204,6 +222,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "Запись успешно обновлена." << std::endl;
         return true;
     }
@@ -219,6 +238,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "Записи успешно удалены." << std::endl;
         return true;
     }
@@ -235,6 +255,7 @@ public:
         MYSQL_RES* result = mysql_store_result(conn);
         if (!result) {
             std::cout << "Ошибка получения результатов: " << mysql_error(conn) << std::endl;
+            processPendingResults();
             return false;
         }
         
@@ -257,6 +278,7 @@ public:
         }
         
         mysql_free_result(result);
+        processPendingResults();
         return true;
     }
 
@@ -271,6 +293,7 @@ public:
             return false;
         }
         
+        processPendingResults();
         std::cout << "Пользователь " << username << " с ролью " << role << " успешно создан." << std::endl;
         return true;
     }
