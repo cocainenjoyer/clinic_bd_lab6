@@ -1,6 +1,6 @@
 #include <iostream>
 #include <string>
-#include <mysql.h>
+#include <mysql/mysql.h>
 #include <vector>
 #include <limits>
 
