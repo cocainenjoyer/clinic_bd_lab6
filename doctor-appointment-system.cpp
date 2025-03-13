@@ -21,11 +21,23 @@ private:
     
     // Вспомогательный метод для обработки оставшихся наборов результатов
     void processPendingResults() {
-        while (mysql_next_result(conn) == 0) {
+        // Продолжаем обрабатывать результаты, пока они есть
+        while (true) {
             MYSQL_RES* result = mysql_store_result(conn);
             if (result) {
                 mysql_free_result(result);
             }
+            
+            // Проверка на наличие дополнительных результатов
+            int status = mysql_next_result(conn);
+            if (status > 0) {
+                std::cout << "Ошибка при обработке результатов: " << mysql_error(conn) << std::endl;
+                break;
+            } else if (status < 0) {
+                // Больше нет результатов
+                break;
+            }
+            // Если status == 0, есть еще результаты, продолжаем цикл
         }
     }
 
@@ -72,6 +84,8 @@ public:
                     mysql_free_result(result);
                 }
             }
+        } else {
+            currentRole = "admin"; // Если база данных не указана, предполагаем админа
         }
         
         return true;
@@ -157,9 +171,25 @@ public:
                         const std::string& appointmentDate, const std::string& diagnosis) {
         if (!checkAdminAccess()) return false;
         
-        std::string query = "CALL add_appointment('" + patientName + "', '" + 
-                            doctorName + "', '" + appointmentDate + "', '" + 
-                            diagnosis + "')";
+        // Экранирование входных данных для предотвращения SQL-инъекций
+        char* escaped_patient = new char[patientName.length() * 2 + 1];
+        char* escaped_doctor = new char[doctorName.length() * 2 + 1];
+        char* escaped_date = new char[appointmentDate.length() * 2 + 1];
+        char* escaped_diagnosis = new char[diagnosis.length() * 2 + 1];
+        
+        mysql_real_escape_string(conn, escaped_patient, patientName.c_str(), patientName.length());
+        mysql_real_escape_string(conn, escaped_doctor, doctorName.c_str(), doctorName.length());
+        mysql_real_escape_string(conn, escaped_date, appointmentDate.c_str(), appointmentDate.length());
+        mysql_real_escape_string(conn, escaped_diagnosis, diagnosis.c_str(), diagnosis.length());
+        
+        std::string query = "CALL add_appointment('" + std::string(escaped_patient) + "', '" + 
+                            std::string(escaped_doctor) + "', '" + std::string(escaped_date) + "', '" + 
+                            std::string(escaped_diagnosis) + "')";
+        
+        delete[] escaped_patient;
+        delete[] escaped_doctor;
+        delete[] escaped_date;
+        delete[] escaped_diagnosis;
         
         if (mysql_query(conn, query.c_str()) != 0) {
             std::cout << "Ошибка добавления записи: " << mysql_error(conn) << std::endl;
@@ -173,7 +203,18 @@ public:
 
     // Поиск записей по текстовому неключевому полю
     bool searchAppointments(const std::string& fieldName, const std::string& searchValue) {
-        std::string query = "CALL search_appointments('" + fieldName + "', '" + searchValue + "')";
+        // Экранирование входных данных
+        char* escaped_field = new char[fieldName.length() * 2 + 1];
+        char* escaped_value = new char[searchValue.length() * 2 + 1];
+        
+        mysql_real_escape_string(conn, escaped_field, fieldName.c_str(), fieldName.length());
+        mysql_real_escape_string(conn, escaped_value, searchValue.c_str(), searchValue.length());
+        
+        std::string query = "CALL search_appointments('" + std::string(escaped_field) + "', '" + 
+                            std::string(escaped_value) + "')";
+        
+        delete[] escaped_field;
+        delete[] escaped_value;
         
         if (mysql_query(conn, query.c_str()) != 0) {
             std::cout << "Ошибка поиска записей: " << mysql_error(conn) << std::endl;
@@ -214,8 +255,18 @@ public:
     bool updateAppointment(int appointmentId, const std::string& fieldName, const std::string& newValue) {
         if (!checkAdminAccess()) return false;
         
+        // Экранирование входных данных
+        char* escaped_field = new char[fieldName.length() * 2 + 1];
+        char* escaped_value = new char[newValue.length() * 2 + 1];
+        
+        mysql_real_escape_string(conn, escaped_field, fieldName.c_str(), fieldName.length());
+        mysql_real_escape_string(conn, escaped_value, newValue.c_str(), newValue.length());
+        
         std::string query = "CALL update_appointment(" + std::to_string(appointmentId) + 
-                           ", '" + fieldName + "', '" + newValue + "')";
+                           ", '" + std::string(escaped_field) + "', '" + std::string(escaped_value) + "')";
+        
+        delete[] escaped_field;
+        delete[] escaped_value;
         
         if (mysql_query(conn, query.c_str()) != 0) {
             std::cout << "Ошибка обновления записи: " << mysql_error(conn) << std::endl;
@@ -231,7 +282,18 @@ public:
     bool deleteAppointmentByField(const std::string& fieldName, const std::string& fieldValue) {
         if (!checkAdminAccess()) return false;
         
-        std::string query = "CALL delete_appointment_by_field('" + fieldName + "', '" + fieldValue + "')";
+        // Экранирование входных данных
+        char* escaped_field = new char[fieldName.length() * 2 + 1];
+        char* escaped_value = new char[fieldValue.length() * 2 + 1];
+        
+        mysql_real_escape_string(conn, escaped_field, fieldName.c_str(), fieldName.length());
+        mysql_real_escape_string(conn, escaped_value, fieldValue.c_str(), fieldValue.length());
+        
+        std::string query = "CALL delete_appointment_by_field('" + std::string(escaped_field) + "', '" + 
+                            std::string(escaped_value) + "')";
+        
+        delete[] escaped_field;
+        delete[] escaped_value;
         
         if (mysql_query(conn, query.c_str()) != 0) {
             std::cout << "Ошибка удаления записи: " << mysql_error(conn) << std::endl;
@@ -270,11 +332,17 @@ public:
         
         // Вывод данных
         MYSQL_ROW row;
+        bool hasResults = false;
         while ((row = mysql_fetch_row(result))) {
+            hasResults = true;
             for (int i = 0; i < numFields; i++) {
                 std::cout << (row[i] ? row[i] : "NULL") << "\t";
             }
             std::cout << std::endl;
+        }
+        
+        if (!hasResults) {
+            std::cout << "Нет записей для отображения." << std::endl;
         }
         
         mysql_free_result(result);
@@ -282,217 +350,231 @@ public:
         return true;
     }
 
-    // Создание нового пользователя
-    bool createUser(const std::string& username, const std::string& password, const std::string& role) {
-        if (!checkAdminAccess()) return false;
-        
-        std::string query = "CALL create_user('" + username + "', '" + password + "', '" + role + "')";
-        
-        if (mysql_query(conn, query.c_str()) != 0) {
-            std::cout << "Ошибка создания пользователя: " << mysql_error(conn) << std::endl;
-            return false;
-        }
-        
-        processPendingResults();
-        std::cout << "Пользователь " << username << " с ролью " << role << " успешно создан." << std::endl;
-        return true;
+// Создание нового пользователя
+bool createUser(const std::string& username, const std::string& password, const std::string& role) {
+    if (!checkAdminAccess()) return false;
+    
+    // Экранирование входных данных
+    char* escaped_username = new char[username.length() * 2 + 1];
+    char* escaped_password = new char[password.length() * 2 + 1];
+    char* escaped_role = new char[role.length() * 2 + 1];
+    
+    mysql_real_escape_string(conn, escaped_username, username.c_str(), username.length());
+    mysql_real_escape_string(conn, escaped_password, password.c_str(), password.length());
+    mysql_real_escape_string(conn, escaped_role, role.c_str(), role.length());
+    
+    std::string query = "CALL create_user('" + std::string(escaped_username) + "', '" + 
+                        std::string(escaped_password) + "', '" + std::string(escaped_role) + "')";
+    
+    delete[] escaped_username;
+    delete[] escaped_password;
+    delete[] escaped_role;
+    
+    if (mysql_query(conn, query.c_str()) != 0) {
+        std::cout << "Ошибка создания пользователя: " << mysql_error(conn) << std::endl;
+        return false;
     }
+    
+    processPendingResults();
+    std::cout << "Пользователь " << username << " с ролью " << role << " успешно создан." << std::endl;
+    return true;
+}
 
-    // Получение текущей роли пользователя
-    std::string getCurrentRole() const {
-        return currentRole;
-    }
+// Получение текущей роли пользователя
+std::string getCurrentRole() const {
+    return currentRole;
+}
 };
 
 // Функция для отображения меню
 void showMenu(const std::string& role) {
-    std::cout << "\n=== Система записи к врачу ===\n";
-    std::cout << "Текущая роль: " << role << "\n\n";
-    
-    std::cout << "1. Просмотреть все записи\n";
-    std::cout << "2. Поиск записей\n";
-    
-    if (role == "admin") {
-        std::cout << "3. Создать базу данных\n";
-        std::cout << "4. Удалить базу данных\n";
-        std::cout << "5. Создать таблицу записей\n";
-        std::cout << "6. Создать таблицу пользователей\n";
-        std::cout << "7. Очистить таблицу\n";
-        std::cout << "8. Добавить новую запись к врачу\n";
-        std::cout << "9. Обновить запись\n";
-        std::cout << "10. Удалить записи\n";
-        std::cout << "11. Создать нового пользователя\n";
-    }
-    
-    std::cout << "0. Выход\n";
-    std::cout << "Выберите действие: ";
+std::cout << "\n=== Система записи к врачу ===\n";
+std::cout << "Текущая роль: " << role << "\n\n";
+
+std::cout << "1. Просмотреть все записи\n";
+std::cout << "2. Поиск записей\n";
+
+if (role == "admin") {
+    std::cout << "3. Создать базу данных\n";
+    std::cout << "4. Удалить базу данных\n";
+    std::cout << "5. Создать таблицу записей\n";
+    std::cout << "6. Создать таблицу пользователей\n";
+    std::cout << "7. Очистить таблицу\n";
+    std::cout << "8. Добавить новую запись к врачу\n";
+    std::cout << "9. Обновить запись\n";
+    std::cout << "10. Удалить записи\n";
+    std::cout << "11. Создать нового пользователя\n";
+}
+
+std::cout << "0. Выход\n";
+std::cout << "Выберите действие: ";
 }
 
 int main() {
-    // Установка кодировки для корректного отображения русских символов
-    setlocale(LC_ALL, "Russian");
+// Установка кодировки для корректного отображения русских символов
+setlocale(LC_ALL, "Russian");
+
+std::string host, username, password, dbName;
+
+std::cout << "=== Система записи к врачу ===\n";
+std::cout << "Введите хост MySQL: ";
+std::getline(std::cin, host);
+std::cout << "Введите имя пользователя: ";
+std::getline(std::cin, username);
+std::cout << "Введите пароль: ";
+std::getline(std::cin, password);
+std::cout << "Введите имя базы данных (оставьте пустым для создания новой): ";
+std::getline(std::cin, dbName);
+
+DatabaseManager dbManager;
+if (!dbManager.connect(host, username, password, dbName)) {
+    std::cout << "Не удалось подключиться к серверу MySQL." << std::endl;
+    return 1;
+}
+
+int choice;
+std::string currentRole = dbManager.getCurrentRole();
+
+while (true) {
+    showMenu(currentRole);
+    std::cin >> choice;
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     
-    std::string host, username, password, dbName;
-    
-    std::cout << "=== Система записи к врачу ===\n";
-    std::cout << "Введите хост MySQL: ";
-    std::getline(std::cin, host);
-    std::cout << "Введите имя пользователя: ";
-    std::getline(std::cin, username);
-    std::cout << "Введите пароль: ";
-    std::getline(std::cin, password);
-    std::cout << "Введите имя базы данных (оставьте пустым для создания новой): ";
-    std::getline(std::cin, dbName);
-    
-    DatabaseManager dbManager;
-    if (!dbManager.connect(host, username, password, dbName)) {
-        std::cout << "Не удалось подключиться к серверу MySQL." << std::endl;
-        return 1;
+    if (choice == 0) {
+        break;
     }
     
-    int choice;
-    std::string currentRole = dbManager.getCurrentRole();
-    
-    while (true) {
-        showMenu(currentRole);
-        std::cin >> choice;
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        
-        if (choice == 0) {
+    switch (choice) {
+        case 1: // Просмотр всех записей
+            dbManager.showAllAppointments();
             break;
-        }
-        
-        switch (choice) {
-            case 1: // Просмотр всех записей
-                dbManager.showAllAppointments();
-                break;
-                
-            case 2: // Поиск записей
-                {
-                    std::string field, value;
-                    std::cout << "Введите поле для поиска (patient_name, doctor_name, diagnosis): ";
-                    std::getline(std::cin, field);
-                    std::cout << "Введите значение для поиска: ";
-                    std::getline(std::cin, value);
-                    dbManager.searchAppointments(field, value);
-                }
-                break;
-                
-            case 3: // Создать базу данных
-                if (currentRole == "admin") {
-                    std::string newDbName;
-                    std::cout << "Введите имя новой базы данных: ";
-                    std::getline(std::cin, newDbName);
-                    dbManager.createDatabase(newDbName);
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            case 4: // Удалить базу данных
-                if (currentRole == "admin") {
-                    std::string dropDbName;
-                    std::cout << "Введите имя базы данных для удаления: ";
-                    std::getline(std::cin, dropDbName);
-                    dbManager.dropDatabase(dropDbName);
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            case 5: // Создать таблицу записей
-                if (currentRole == "admin") {
-                    dbManager.createAppointmentsTable();
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            case 6: // Создать таблицу пользователей
-                if (currentRole == "admin") {
-                    dbManager.createUsersTable();
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            case 7: // Очистить таблицу
-                if (currentRole == "admin") {
-                    std::string tableName;
-                    std::cout << "Введите имя таблицы для очистки: ";
-                    std::getline(std::cin, tableName);
-                    dbManager.truncateTable(tableName);
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            case 8: // Добавить новую запись
-                if (currentRole == "admin") {
-                    std::string patientName, doctorName, appointmentDate, diagnosis;
-                    std::cout << "Введите имя пациента: ";
-                    std::getline(std::cin, patientName);
-                    std::cout << "Введите имя врача: ";
-                    std::getline(std::cin, doctorName);
-                    std::cout << "Введите дату приема (ГГГГ-ММ-ДД): ";
-                    std::getline(std::cin, appointmentDate);
-                    std::cout << "Введите диагноз: ";
-                    std::getline(std::cin, diagnosis);
-                    dbManager.addAppointment(patientName, doctorName, appointmentDate, diagnosis);
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            case 9: // Обновить запись
-                if (currentRole == "admin") {
-                    int id;
-                    std::string field, value;
-                    std::cout << "Введите ID записи для обновления: ";
-                    std::cin >> id;
-                    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                    std::cout << "Введите поле для обновления (patient_name, doctor_name, appointment_date, diagnosis): ";
-                    std::getline(std::cin, field);
-                    std::cout << "Введите новое значение: ";
-                    std::getline(std::cin, value);
-                    dbManager.updateAppointment(id, field, value);
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            case 10: // Удалить записи
-                if (currentRole == "admin") {
-                    std::string field, value;
-                    std::cout << "Введите поле для удаления (patient_name, doctor_name, diagnosis): ";
-                    std::getline(std::cin, field);
-                    std::cout << "Введите значение для удаления: ";
-                    std::getline(std::cin, value);
-                    dbManager.deleteAppointmentByField(field, value);
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            case 11: // Создать нового пользователя
-                if (currentRole == "admin") {
-                    std::string newUsername, newPassword, newRole;
-                    std::cout << "Введите имя нового пользователя: ";
-                    std::getline(std::cin, newUsername);
-                    std::cout << "Введите пароль: ";
-                    std::getline(std::cin, newPassword);
-                    std::cout << "Введите роль (admin/guest): ";
-                    std::getline(std::cin, newRole);
-                    dbManager.createUser(newUsername, newPassword, newRole);
-                } else {
-                    std::cout << "Недостаточно прав для этой операции." << std::endl;
-                }
-                break;
-                
-            default:
-                std::cout << "Неверный выбор. Пожалуйста, попробуйте снова." << std::endl;
-        }
+            
+        case 2: // Поиск записей
+            {
+                std::string field, value;
+                std::cout << "Введите поле для поиска (patient_name, doctor_name, diagnosis): ";
+                std::getline(std::cin, field);
+                std::cout << "Введите значение для поиска: ";
+                std::getline(std::cin, value);
+                dbManager.searchAppointments(field, value);
+            }
+            break;
+            
+        case 3: // Создать базу данных
+            if (currentRole == "admin") {
+                std::string newDbName;
+                std::cout << "Введите имя новой базы данных: ";
+                std::getline(std::cin, newDbName);
+                dbManager.createDatabase(newDbName);
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        case 4: // Удалить базу данных
+            if (currentRole == "admin") {
+                std::string dropDbName;
+                std::cout << "Введите имя базы данных для удаления: ";
+                std::getline(std::cin, dropDbName);
+                dbManager.dropDatabase(dropDbName);
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        case 5: // Создать таблицу записей
+            if (currentRole == "admin") {
+                dbManager.createAppointmentsTable();
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        case 6: // Создать таблицу пользователей
+            if (currentRole == "admin") {
+                dbManager.createUsersTable();
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        case 7: // Очистить таблицу
+            if (currentRole == "admin") {
+                std::string tableName;
+                std::cout << "Введите имя таблицы для очистки: ";
+                std::getline(std::cin, tableName);
+                dbManager.truncateTable(tableName);
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        case 8: // Добавить новую запись
+            if (currentRole == "admin") {
+                std::string patientName, doctorName, appointmentDate, diagnosis;
+                std::cout << "Введите имя пациента: ";
+                std::getline(std::cin, patientName);
+                std::cout << "Введите имя врача: ";
+                std::getline(std::cin, doctorName);
+                std::cout << "Введите дату приема (ГГГГ-ММ-ДД): ";
+                std::getline(std::cin, appointmentDate);
+                std::cout << "Введите диагноз: ";
+                std::getline(std::cin, diagnosis);
+                dbManager.addAppointment(patientName, doctorName, appointmentDate, diagnosis);
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        case 9: // Обновить запись
+            if (currentRole == "admin") {
+                int id;
+                std::string field, value;
+                std::cout << "Введите ID записи для обновления: ";
+                std::cin >> id;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cout << "Введите поле для обновления (patient_name, doctor_name, appointment_date, diagnosis): ";
+                std::getline(std::cin, field);
+                std::cout << "Введите новое значение: ";
+                std::getline(std::cin, value);
+                dbManager.updateAppointment(id, field, value);
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        case 10: // Удалить записи
+            if (currentRole == "admin") {
+                std::string field, value;
+                std::cout << "Введите поле для удаления (patient_name, doctor_name, diagnosis): ";
+                std::getline(std::cin, field);
+                std::cout << "Введите значение для удаления: ";
+                std::getline(std::cin, value);
+                dbManager.deleteAppointmentByField(field, value);
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        case 11: // Создать нового пользователя
+            if (currentRole == "admin") {
+                std::string newUsername, newPassword, newRole;
+                std::cout << "Введите имя нового пользователя: ";
+                std::getline(std::cin, newUsername);
+                std::cout << "Введите пароль: ";
+                std::getline(std::cin, newPassword);
+                std::cout << "Введите роль (admin/guest): ";
+                std::getline(std::cin, newRole);
+                dbManager.createUser(newUsername, newPassword, newRole);
+            } else {
+                std::cout << "Недостаточно прав для этой операции." << std::endl;
+            }
+            break;
+            
+        default:
+            std::cout << "Неверный выбор. Пожалуйста, попробуйте снова." << std::endl;
     }
-    
-    return 0;
+}
+
+return 0;
 }
